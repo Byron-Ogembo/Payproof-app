@@ -1,0 +1,257 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum BusinessCategory {
+  RETAIL
+  RESTAURANT
+  CLOTHING
+  ELECTRONICS
+  COSMETICS
+  SERVICES
+  ONLINE_SELLER
+  WHOLESALE
+  OTHER
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  CASHIER
+  VIEWER
+}
+
+enum CustomerStatus {
+  NEW
+  ACTIVE
+  RETURNING
+  INACTIVE
+  HIGH_VALUE
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_PAYMENT
+  PARTIALLY_PAID
+  PAID
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+  DISPUTED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  VERIFIED
+  PARTIALLY_PAID
+  OVERPAID
+  FAILED
+  REFUNDED
+  DISPUTED
+  REQUIRES_REVIEW
+}
+
+enum NotificationType {
+  PAYMENT_VERIFIED
+  PAYMENT_FAILED
+  PAYMENT_REQUIRES_REVIEW
+  NEW_ORDER
+  PAYMENT_REMINDER
+  LOW_STOCK
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+model Business {
+  id               String   @id @default(cuid())
+  businessName     String
+  ownerName        String
+  email            String   @unique
+  phone            String
+  businessCategory BusinessCategory
+  location         String?
+  currency         String   @default("KES")
+  
+  users            User[]
+  customers        Customer[]
+  products         Product[]
+  orders           Order[]
+  payments         Payment[]
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Notification {
+  id           String             @id @default(cuid())
+  businessId   String
+  business     Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId       String?
+  type         NotificationType
+  channel      NotificationChannel
+  title        String
+  message      String
+  entityType   String?
+  entityId     String?
+  dedupeKey    String
+  metadata     Json?
+  readAt       DateTime?
+  createdAt    DateTime @default(now())
+
+  @@unique([businessId, dedupeKey])
+  @@index([businessId, readAt, createdAt])
+  @@index([userId, readAt, createdAt])
+}
+
+model Customer {
+  id String @id @default(cuid())
+  businessId String
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name String
+  phone String?
+  email String?
+  address String?
+  notes String?
+  status CustomerStatus @default(NEW)
+  orders Order[]
+  payments Payment[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([businessId, name])
+  @@unique([businessId, email])
+}
+
+model Product {
+  id String @id @default(cuid())
+  businessId String
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name String
+  sku String
+  category String?
+  description String?
+  sellingPrice Int
+  costPrice Int
+  stockQuantity Int @default(0)
+  reorderLevel Int @default(0)
+  active Boolean @default(true)
+  orderItems OrderItem[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([businessId, sku])
+  @@index([businessId, name])
+}
+
+model Order {
+  id String @id @default(cuid())
+  orderNumber String @unique
+  businessId String
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId String
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  status OrderStatus @default(DRAFT)
+  subtotal Int
+  discount Int @default(0)
+  tax Int @default(0)
+  total Int
+  currency String @default("KES")
+  notes String?
+  items OrderItem[]
+  payments Payment[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([businessId, status, createdAt])
+}
+
+model OrderItem {
+  id String @id @default(cuid())
+  orderId String
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity Int
+  unitPrice Int
+  total Int
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+  businessId String
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId String?
+  action String
+  entityType String
+  entityId String
+  oldValue Json?
+  newValue Json?
+  metadata Json?
+  createdAt DateTime @default(now())
+  @@index([businessId, createdAt])
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String?
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(VIEWER)
+  
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  businessId     String
+  business       Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  orderId        String?
+  order          Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customerId     String?
+  customer       Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  
+  provider       String        
+  providerRef    String?       
+  checkoutRequestId  String?  @unique  // M-PESA: CheckoutRequestID
+  merchantRequestId  String?           // M-PESA: MerchantRequestID
+  idempotencyKey String?       @unique 
+  
+  amount         Int           
+  currency       String        @default("KES")
+  
+  status         PaymentStatus @default(PENDING)
+  
+  errorCode      String?
+  errorMessage   String?
+  
+  events         PaymentEvent[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  
+  @@unique([businessId, provider, providerRef]) 
+  @@index([businessId, status])
+}
+
+model PaymentEvent {
+  id           String   @id @default(cuid())
+  paymentId    String
+  payment      Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  status       PaymentStatus
+  message      String?
+  rawPayload   Json?    
+  createdAt    DateTime @default(now())
+}
