@@ -15,7 +15,7 @@ export enum NotificationChannel {
   EMAIL = "EMAIL",
 }
 
-export type NotificationMetadata = Record<string, unknown>;
+export type NotificationMetadata = Prisma.InputJsonObject;
 
 export type CreateNotificationInput = {
   businessId: string;
@@ -190,10 +190,10 @@ export async function triggerBusinessNotificationTx(
     ? { businessId: input.businessId, id: { in: input.userIds } }
     : { businessId: input.businessId };
 
-  const users = await tx.user.findMany({
+  const users = tx.user ? await tx.user.findMany({
     where: userFilter,
     select: { id: true, email: true, name: true, role: true },
-  });
+  }) : [];
 
   if (users.length === 0) {
     return [];

@@ -171,6 +171,14 @@ export async function createOrder(data: OrderFormValues) {
       },
     });
 
+    // 6. Trigger New Order notification
+    const { triggerOrderNotification } = await import("@/lib/notifications");
+    await triggerOrderNotification({
+      businessId,
+      orderId: newOrder.id,
+      orderNumber: newOrder.orderNumber,
+    });
+
     return newOrder;
   });
 
@@ -198,8 +206,9 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
     const wasDeducted = (existing.status === OrderStatus.PAID || existing.status === OrderStatus.PROCESSING || existing.status === OrderStatus.SHIPPED || existing.status === OrderStatus.DELIVERED);
 
     if (requiresDeduction && !wasDeducted) {
+      const { triggerLowStockNotification } = await import("@/lib/notifications");
       for (const item of existing.items) {
-        await tx.product.update({
+        const updatedProduct = await tx.product.update({
           where: { id: item.productId },
           data: {
             stockQuantity: {
@@ -207,6 +216,16 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
             },
           },
         });
+
+        if (updatedProduct.stockQuantity <= updatedProduct.reorderLevel) {
+          await triggerLowStockNotification({
+            businessId,
+            productId: updatedProduct.id,
+            productName: updatedProduct.name,
+            stockQuantity: updatedProduct.stockQuantity,
+            reorderLevel: updatedProduct.reorderLevel,
+          });
+        }
       }
     } else if (!requiresDeduction && wasDeducted) {
       // Revert deduction if order is cancelled

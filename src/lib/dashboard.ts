@@ -249,7 +249,7 @@ export async function getDashboardData(
     ...failedPaymentRows.map((payment) => ({
       id: payment.id,
       type: "payment" as const,
-      level: payment.status === PaymentStatus.REQUIRES_REVIEW ? "warning" : "critical",
+      level: (payment.status === PaymentStatus.REQUIRES_REVIEW ? "warning" : "critical") as DashboardAlert["level"],
       title: payment.status === PaymentStatus.REQUIRES_REVIEW ? "Payment review required" : "Payment failed",
       message: payment.errorMessage ?? "Payment requires attention.",
       createdAt: payment.createdAt,
@@ -257,7 +257,7 @@ export async function getDashboardData(
     ...unpaidOrderRows.map((order) => ({
       id: order.id,
       type: "order" as const,
-      level: order.status === OrderStatus.PARTIALLY_PAID ? "warning" : "info",
+      level: "warning" as const,
       title: "Outstanding order",
       message: `${order.orderNumber} is still awaiting payment completion.`,
       createdAt: order.createdAt,

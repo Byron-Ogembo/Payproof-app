@@ -13,7 +13,7 @@
  */
 
 import { prisma } from "@/lib/db/prisma";
-import { PaymentStatus } from "@prisma/client";
+import { PaymentStatus, Prisma } from "@prisma/client";
 import { matchAndVerifyPayment } from "@/lib/payments/engine";
 import {
   MpesaCallbackPayload,
@@ -70,7 +70,7 @@ export async function handleMpesaCallback(
           paymentId: payment.id,
           status: PaymentStatus.FAILED,
           message: `M-PESA ResultCode ${ResultCode}: ${ResultDesc}`,
-          rawPayload: payload as unknown as Record<string, unknown>,
+          rawPayload: JSON.parse(JSON.stringify(payload)) as Prisma.InputJsonValue,
         },
       });
 
@@ -112,7 +112,7 @@ export async function handleMpesaCallback(
         paymentId: payment.id,
         status: PaymentStatus.PROCESSING,
         message: `M-PESA confirmed. Receipt: ${mpesaReceiptNumber}, Amount: ${amountPaid}`,
-        rawPayload: payload as unknown as Record<string, unknown>,
+        rawPayload: JSON.parse(JSON.stringify(payload)) as Prisma.InputJsonValue,
       },
     });
 
