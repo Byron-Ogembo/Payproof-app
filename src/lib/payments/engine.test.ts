@@ -1,6 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { processWebhook, matchAndVerifyPayment, PaymentPayload } from "./engine";
+import {
+  processWebhook,
+  matchAndVerifyPayment,
+  calculateOrderBalance,
+  PaymentPayload,
+} from "./engine";
 import { PaymentStatus, OrderStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
@@ -11,6 +16,7 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   paymentEvent: {
     create: vi.fn(),
@@ -178,6 +184,108 @@ describe("Payment Engine", () => {
       expect(prisma.payment.update).toHaveBeenCalledWith(expect.objectContaining({
         data: { status: PaymentStatus.FAILED }
       }));
+    });
+
+    it("should settle split payments when second installment completes order total and promote prior partial payment", async () => {
+      const secondInstallment = {
+        ...mockPayment,
+        id: "pay_2",
+        amount: 600,
+        status: PaymentStatus.PROCESSING,
+      };
+      (prisma.payment.findUnique as any).mockResolvedValue(secondInstallment);
+      (prisma.order.findUnique as any).mockResolvedValue({
+        ...mockOrder,
+        orderNumber: "ORD-100",
+        total: 1000,
+      });
+      (prisma.payment.findMany as any).mockResolvedValue([
+        { id: "pay_1", amount: 400 },
+        { id: "pay_2", amount: 600 },
+      ]);
+      (prisma.payment.update as any).mockResolvedValue({
+        ...secondInstallment,
+        status: PaymentStatus.VERIFIED,
+      });
+
+      await matchAndVerifyPayment("pay_2", "ord_1");
+
+      expect(prisma.payment.update).toHaveBeenCalledWith({
+        where: { id: "pay_2" },
+        data: {
+          status: PaymentStatus.VERIFIED,
+          orderId: "ord_1",
+          customerId: "cust_1",
+        },
+      });
+      expect(prisma.payment.updateMany).toHaveBeenCalledWith({
+        where: {
+          orderId: "ord_1",
+          id: { not: "pay_2" },
+          status: PaymentStatus.PARTIALLY_PAID,
+        },
+        data: { status: PaymentStatus.VERIFIED },
+      });
+      expect(prisma.order.update).toHaveBeenCalledWith({
+        where: { id: "ord_1" },
+        data: { status: OrderStatus.PAID },
+      });
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalledWith({
+        where: { orderId: "ord_1", status: "OPEN" },
+        data: { status: "PAID" },
+      });
+    });
+
+    it("should count an unmatched REQUIRES_REVIEW payment when manually matched to an order", async () => {
+      const reviewPayment = {
+        id: "pay_review",
+        businessId: "bus_1",
+        orderId: null,
+        amount: 1000,
+        status: PaymentStatus.REQUIRES_REVIEW,
+      };
+      (prisma.payment.findUnique as any).mockResolvedValue(reviewPayment);
+      (prisma.order.findUnique as any).mockResolvedValue(mockOrder);
+      // Previously unmatched payment is not yet returned in orderId query
+      (prisma.payment.findMany as any).mockResolvedValue([]);
+      (prisma.payment.update as any).mockResolvedValue({
+        ...reviewPayment,
+        status: PaymentStatus.VERIFIED,
+      });
+
+      await matchAndVerifyPayment("pay_review", "ord_1");
+
+      expect(prisma.payment.update).toHaveBeenCalledWith({
+        where: { id: "pay_review" },
+        data: {
+          status: PaymentStatus.VERIFIED,
+          orderId: "ord_1",
+          customerId: "cust_1",
+        },
+      });
+      expect(prisma.order.update).toHaveBeenCalledWith({
+        where: { id: "ord_1" },
+        data: { status: OrderStatus.PAID },
+      });
+    });
+  });
+
+  describe("calculateOrderBalance", () => {
+    it("computes remaining balance ignoring pending and failed attempts", () => {
+      const balance = calculateOrderBalance(1500, [
+        { amount: 500, status: PaymentStatus.PARTIALLY_PAID },
+        { amount: 1500, status: PaymentStatus.PENDING },
+        { amount: 1500, status: PaymentStatus.FAILED },
+      ]);
+      expect(balance).toEqual({ paidAmount: 500, remainingBalance: 1000 });
+    });
+
+    it("clamps remaining balance to 0 when settled or overpaid", () => {
+      const balance = calculateOrderBalance(1000, [
+        { amount: 400, status: PaymentStatus.VERIFIED },
+        { amount: 800, status: PaymentStatus.OVERPAID },
+      ]);
+      expect(balance).toEqual({ paidAmount: 1200, remainingBalance: 0 });
     });
   });
 });

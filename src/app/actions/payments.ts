@@ -13,6 +13,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db/prisma";
+import { calculateOrderBalance } from "@/lib/payments/engine";
 import { initiateStkPush } from "@/lib/payments/providers/mpesa/stk";
 import { PaymentStatus } from "@prisma/client";
 
@@ -32,6 +33,9 @@ export async function initiateMpesaPayment({
   // 1. Verify order belongs to this business and is in a payable state
   const order = await prisma.order.findUnique({
     where: { id: orderId, businessId },
+    include: {
+      payments: { select: { amount: true, status: true } },
+    },
   });
 
   if (!order) throw new Error("Order not found");
@@ -41,6 +45,11 @@ export async function initiateMpesaPayment({
     throw new Error(`Order is not in a payable state (current: ${order.status})`);
   }
 
+  const { remainingBalance } = calculateOrderBalance(order.total, order.payments);
+  if (remainingBalance <= 0) {
+    throw new Error("Order has already been paid in full");
+  }
+
   // 2. Create a PENDING payment record BEFORE contacting Safaricom
   const payment = await prisma.payment.create({
     data: {
@@ -48,7 +57,7 @@ export async function initiateMpesaPayment({
       orderId,
       customerId: order.customerId,
       provider: "MPESA",
-      amount: order.total,
+      amount: remainingBalance,
       currency: order.currency,
       status: PaymentStatus.PENDING,
       events: {
@@ -65,7 +74,7 @@ export async function initiateMpesaPayment({
   try {
     stkResponse = await initiateStkPush({
       phoneNumber,
-      amount: order.total,
+      amount: remainingBalance,
       orderId: order.orderNumber,
       description: `PayProof: ${order.orderNumber}`,
     });
@@ -107,7 +116,7 @@ export async function initiateMpesaPayment({
       newValue: {
         orderId,
         phoneNumber,
-        amount: order.total,
+        amount: remainingBalance,
         CheckoutRequestID: stkResponse.CheckoutRequestID,
         MerchantRequestID: stkResponse.MerchantRequestID,
       },

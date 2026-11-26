@@ -2,6 +2,23 @@ import { prisma } from "@/lib/db/prisma";
 import { PaymentStatus, OrderStatus, Prisma } from "@prisma/client";
 import { NotificationType, triggerPaymentNotificationTx } from "@/lib/notifications";
 
+export const CONFIRMED_PAYMENT_STATUSES: PaymentStatus[] = [
+  PaymentStatus.VERIFIED,
+  PaymentStatus.PARTIALLY_PAID,
+  PaymentStatus.OVERPAID,
+];
+
+export function calculateOrderBalance(
+  orderTotal: number,
+  payments: Array<{ amount: number; status: PaymentStatus }>,
+) {
+  const paidAmount = payments
+    .filter((payment) => CONFIRMED_PAYMENT_STATUSES.includes(payment.status))
+    .reduce((sum, payment) => sum + payment.amount, 0);
+  const remainingBalance = Math.max(0, orderTotal - paidAmount);
+  return { paidAmount, remainingBalance };
+}
+
 export interface PaymentPayload {
   businessId: string;
   provider: string;       // e.g. "MPESA"
@@ -65,14 +82,13 @@ export async function matchAndVerifyPayment(paymentId: string, orderId?: string)
     });
 
     if (!payment) throw new Error("Payment not found");
-    if (payment.status === PaymentStatus.VERIFIED || payment.status === PaymentStatus.FAILED) {
+    if (
+      payment.status === PaymentStatus.VERIFIED ||
+      payment.status === PaymentStatus.FAILED ||
+      payment.status === PaymentStatus.REFUNDED
+    ) {
       return payment; // Already in terminal state
     }
-
-    const orderForNotification = orderId || payment.orderId ? await tx.order.findUnique({
-      where: { id: orderId || payment.orderId! },
-      include: { customer: true },
-    }) : null;
 
     const targetOrderId = orderId || payment.orderId;
 
@@ -173,7 +189,10 @@ export async function matchAndVerifyPayment(paymentId: string, orderId?: string)
       },
       select: { id: true, amount: true },
     });
-    const amountReceived = confirmedPayments.reduce((sum, item) => sum + item.amount, 0);
+    const priorTotal = confirmedPayments
+      .filter((item) => item.id !== payment.id)
+      .reduce((sum, item) => sum + item.amount, 0);
+    const amountReceived = priorTotal + payment.amount;
 
     // Math Evaluation
     let finalPaymentStatus: PaymentStatus = PaymentStatus.VERIFIED;
@@ -219,6 +238,17 @@ export async function matchAndVerifyPayment(paymentId: string, orderId?: string)
     });
 
     if (finalOrderStatus === OrderStatus.PAID) {
+      // Promote earlier partial installments on this order to VERIFIED now that
+      // the full order total has been collected.
+      await tx.payment.updateMany({
+        where: {
+          orderId: order.id,
+          id: { not: payment.id },
+          status: PaymentStatus.PARTIALLY_PAID,
+        },
+        data: { status: PaymentStatus.VERIFIED },
+      });
+
       await tx.paymentRequest.updateMany({
         where: { orderId: order.id, status: "OPEN" },
         data: { status: "PAID" },
