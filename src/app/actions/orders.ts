@@ -78,6 +78,7 @@ export async function getOrderById(id: string) {
           product: true,
         },
       },
+      payments: { orderBy: { createdAt: "desc" } },
     },
   });
 

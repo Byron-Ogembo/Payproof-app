@@ -163,23 +163,35 @@ export async function matchAndVerifyPayment(paymentId: string, orderId?: string)
       return failedPayment;
     }
 
+    // Reconcile against every confirmed payment for this order. A merchant can
+    // legitimately collect an order in instalments, so comparing only the most
+    // recent payment would incorrectly leave a fully-paid order outstanding.
+    const confirmedPayments = await tx.payment.findMany({
+      where: {
+        orderId: order.id,
+        status: { in: [PaymentStatus.PROCESSING, PaymentStatus.VERIFIED, PaymentStatus.PARTIALLY_PAID, PaymentStatus.OVERPAID] },
+      },
+      select: { id: true, amount: true },
+    });
+    const amountReceived = confirmedPayments.reduce((sum, item) => sum + item.amount, 0);
+
     // Math Evaluation
     let finalPaymentStatus: PaymentStatus = PaymentStatus.VERIFIED;
     let finalOrderStatus: OrderStatus = OrderStatus.PAID;
     let eventMessage = "Payment matched perfectly.";
 
-    if (payment.amount === order.total) {
+    if (amountReceived === order.total) {
       finalPaymentStatus = PaymentStatus.VERIFIED;
       finalOrderStatus = OrderStatus.PAID;
-      eventMessage = `Exact payment of ${payment.amount} matches order total.`;
-    } else if (payment.amount < order.total) {
+      eventMessage = `Order settled in full. Received: ${amountReceived}, Expected: ${order.total}.`;
+    } else if (amountReceived < order.total) {
       finalPaymentStatus = PaymentStatus.PARTIALLY_PAID;
       finalOrderStatus = OrderStatus.PARTIALLY_PAID;
-      eventMessage = `Partial payment. Paid: ${payment.amount}, Expected: ${order.total}`;
-    } else if (payment.amount > order.total) {
+      eventMessage = `Partial settlement. Received: ${amountReceived}, Balance: ${order.total - amountReceived}.`;
+    } else if (amountReceived > order.total) {
       finalPaymentStatus = PaymentStatus.OVERPAID;
       finalOrderStatus = OrderStatus.PAID;
-      eventMessage = `Overpayment. Paid: ${payment.amount}, Expected: ${order.total}`;
+      eventMessage = `Overpayment. Received: ${amountReceived}, Expected: ${order.total}`;
     }
 
     // Update the payment
@@ -205,6 +217,13 @@ export async function matchAndVerifyPayment(paymentId: string, orderId?: string)
       where: { id: order.id },
       data: { status: finalOrderStatus },
     });
+
+    if (finalOrderStatus === OrderStatus.PAID) {
+      await tx.paymentRequest.updateMany({
+        where: { orderId: order.id, status: "OPEN" },
+        data: { status: "PAID" },
+      });
+    }
 
     if (finalPaymentStatus === PaymentStatus.VERIFIED) {
       await triggerPaymentNotificationTx(tx, {

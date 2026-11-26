@@ -57,6 +57,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             >
               Notifications
             </Link>
+            <Link href="/dashboard/reconciliation" className="rounded-lg px-3 py-2 text-slate-300 hover:bg-slate-800 hover:text-white transition">Reconcile</Link>
             <Link
               href="/dashboard/ai"
               className="rounded-lg bg-gradient-to-r from-emerald-500 to-teal-400 px-3.5 py-1.5 font-bold text-slate-950 shadow-md shadow-emerald-500/20 hover:scale-105 transition"

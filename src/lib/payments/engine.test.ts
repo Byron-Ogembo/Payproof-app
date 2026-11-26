@@ -8,12 +8,14 @@ const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock)),
   payment: {
     findUnique: vi.fn(),
+    findMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
   },
   paymentEvent: {
     create: vi.fn(),
   },
+  paymentRequest: { updateMany: vi.fn() },
   order: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -96,6 +98,7 @@ describe("Payment Engine", () => {
     it("should mark exact payment as VERIFIED and order as PAID", async () => {
       (prisma.payment.findUnique as any).mockResolvedValue(mockPayment);
       (prisma.order.findUnique as any).mockResolvedValue(mockOrder);
+      (prisma.payment.findMany as any).mockResolvedValue([{ id: "pay_1", amount: 1000 }]);
       (prisma.payment.update as any).mockResolvedValue({ ...mockPayment, status: PaymentStatus.VERIFIED });
 
       await matchAndVerifyPayment("pay_1", "ord_1");
@@ -116,7 +119,7 @@ describe("Payment Engine", () => {
       expect(prisma.paymentEvent.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           status: PaymentStatus.VERIFIED,
-          message: expect.stringContaining("Exact payment")
+          message: expect.stringContaining("settled in full")
         })
       });
     });
@@ -125,6 +128,7 @@ describe("Payment Engine", () => {
       const partialPayment = { ...mockPayment, amount: 500 };
       (prisma.payment.findUnique as any).mockResolvedValue(partialPayment);
       (prisma.order.findUnique as any).mockResolvedValue(mockOrder);
+      (prisma.payment.findMany as any).mockResolvedValue([{ id: "pay_1", amount: 500 }]);
 
       await matchAndVerifyPayment("pay_1", "ord_1");
 
@@ -140,6 +144,7 @@ describe("Payment Engine", () => {
       const overPayment = { ...mockPayment, amount: 1500 };
       (prisma.payment.findUnique as any).mockResolvedValue(overPayment);
       (prisma.order.findUnique as any).mockResolvedValue(mockOrder);
+      (prisma.payment.findMany as any).mockResolvedValue([{ id: "pay_1", amount: 1500 }]);
 
       await matchAndVerifyPayment("pay_1", "ord_1");
 

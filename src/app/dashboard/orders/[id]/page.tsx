@@ -3,6 +3,7 @@ import { OrderStatusForm } from "@/app/components/orders/OrderStatusForm";
 import Link from "next/link";
 import { ArrowLeft, User, Calendar, FileText } from "lucide-react";
 import { notFound } from "next/navigation";
+import { PaymentRequestButton } from "@/app/components/orders/PaymentRequestButton";
 
 export default async function OrderProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,6 +19,7 @@ export default async function OrderProfilePage({ params }: { params: Promise<{ i
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
+          <PaymentRequestButton orderId={order.id} />
           <Link
             href="/dashboard/orders"
             className="rounded-full p-2 hover:bg-slate-100 text-slate-500 hover:text-slate-900"
@@ -69,6 +71,10 @@ export default async function OrderProfilePage({ params }: { params: Promise<{ i
               <p className="text-sm text-slate-700 whitespace-pre-wrap">{order.notes}</p>
             </div>
           )}
+          <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-slate-500">Payments</h3>
+            {order.payments.length === 0 ? <p className="text-sm text-slate-500">No payments have been requested yet.</p> : <div className="space-y-3">{order.payments.map((payment) => <div key={payment.id} className="flex items-center justify-between gap-3 rounded-md bg-slate-50 p-3 text-sm"><div><p className="font-semibold text-slate-900">KES {payment.amount.toLocaleString()} · {payment.status.replace(/_/g, " ")}</p><p className="text-xs text-slate-500">{payment.providerRef ?? "Awaiting M-PESA confirmation"}</p></div>{["VERIFIED", "OVERPAID"].includes(payment.status) && <Link href={`/receipt/${payment.id}`} className="font-semibold text-emerald-700 hover:underline">Receipt</Link>}</div>)}</div>}
+          </div>
         </div>
 
         <div className="md:col-span-1 space-y-6">

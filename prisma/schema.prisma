@@ -73,6 +73,13 @@ enum NotificationChannel {
   EMAIL
 }
 
+enum PaymentRequestStatus {
+  OPEN
+  PAID
+  EXPIRED
+  CANCELLED
+}
+
 model Business {
   id               String   @id @default(cuid())
   businessName     String
@@ -88,6 +95,7 @@ model Business {
   products         Product[]
   orders           Order[]
   payments         Payment[]
+  paymentRequests  PaymentRequest[]
   auditLogs        AuditLog[]
   notifications    Notification[]
   
@@ -170,6 +178,7 @@ model Order {
   notes String?
   items OrderItem[]
   payments Payment[]
+  paymentRequests PaymentRequest[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([businessId, status, createdAt])
@@ -223,6 +232,8 @@ model Payment {
   order          Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
   customerId     String?
   customer       Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  paymentRequestId String?
+  paymentRequest PaymentRequest? @relation(fields: [paymentRequestId], references: [id], onDelete: SetNull)
   
   provider       String        
   providerRef    String?       
@@ -244,6 +255,24 @@ model Payment {
   
   @@unique([businessId, provider, providerRef]) 
   @@index([businessId, status])
+  @@index([paymentRequestId])
+}
+
+model PaymentRequest {
+  id          String               @id @default(cuid())
+  token       String               @unique
+  businessId  String
+  business    Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  orderId     String
+  order       Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status      PaymentRequestStatus @default(OPEN)
+  expiresAt   DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  payments    Payment[]
+
+  @@index([businessId, status, createdAt])
+  @@index([orderId])
 }
 
 model PaymentEvent {
